@@ -1,0 +1,64 @@
+name: Docker Image Artifact
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and upload Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image metadata
+        id: meta
+        shell: bash
+        run: |
+          ref_name="${GITHUB_REF_NAME:-manual}"
+          safe_ref="$(printf '%s' "$ref_name" | tr '/:@' '---' | tr -cd '[:alnum:]._-')"
+          short_sha="${GITHUB_SHA::7}"
+          image_name="cpa-exporter"
+          image_tag="${safe_ref}-${short_sha}"
+          artifact_name="${image_name}-${image_tag}"
+          {
+            echo "image_name=${image_name}"
+            echo "image_tag=${image_tag}"
+            echo "artifact_name=${artifact_name}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.ref.name=${GITHUB_REF_NAME}" \
+            -t "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}" \
+            .
+
+      - name: Save Docker image artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          docker save "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}" \
+            | gzip -9 > "dist/${{ steps.meta.outputs.artifact_name }}.tar.gz"
+          sha256sum "dist/${{ steps.meta.outputs.artifact_name }}.tar.gz" > "dist/${{ steps.meta.outputs.artifact_name }}.sha256"
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: |
+            dist/${{ steps.meta.outputs.artifact_name }}.tar.gz
+            dist/${{ steps.meta.outputs.artifact_name }}.sha256
+          if-no-files-found: error
+          retention-days: 30
