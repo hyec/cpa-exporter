@@ -30,25 +30,13 @@ jobs:
           short_sha="${GITHUB_SHA::7}"
           image_name="cpa-exporter"
           image_tag="${safe_ref}-${short_sha}"
-          image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${image_name}"
-          tag_list="${image_repo}:${image_tag}"
-          if [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
-            tag_list="${tag_list}"$'\n'"${image_repo}:latest"
-          fi
           {
             echo "image_name=${image_name}"
             echo "image_tag=${image_tag}"
-            echo "image_repo=${image_repo}"
-            echo "tags<<EOF"
-            echo "${tag_list}"
-            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -57,14 +45,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-arch image to GHCR
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.ref.name=${{ github.ref_name }}
+      - name: Tag image for GHCR
+        run: |
+          docker tag \
+            "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}" \
+            "ghcr.io/${{ github.repository_owner }}/${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}"
+
+      - name: Push image to GHCR
+        run: |
+          docker push "ghcr.io/${{ github.repository_owner }}/${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}"
