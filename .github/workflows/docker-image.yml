@@ -1,4 +1,4 @@
-name: Docker Image Artifact
+name: Docker Image Publish
 
 on:
   push:
@@ -10,10 +10,11 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build:
-    name: Build and upload Docker image
+    name: Build and publish Docker image
     runs-on: ubuntu-latest
 
     steps:
@@ -29,36 +30,41 @@ jobs:
           short_sha="${GITHUB_SHA::7}"
           image_name="cpa-exporter"
           image_tag="${safe_ref}-${short_sha}"
-          artifact_name="${image_name}-${image_tag}"
+          image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${image_name}"
+          tag_list="${image_repo}:${image_tag}"
+          if [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
+            tag_list="${tag_list}"$'\n'"${image_repo}:latest"
+          fi
           {
             echo "image_name=${image_name}"
             echo "image_tag=${image_tag}"
-            echo "artifact_name=${artifact_name}"
+            echo "image_repo=${image_repo}"
+            echo "tags<<EOF"
+            echo "${tag_list}"
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build Docker image
-        run: |
-          docker build \
-            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.ref.name=${GITHUB_REF_NAME}" \
-            -t "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}" \
-            .
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Save Docker image artifact
-        shell: bash
-        run: |
-          mkdir -p dist
-          docker save "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}" \
-            | gzip -9 > "dist/${{ steps.meta.outputs.artifact_name }}.tar.gz"
-          sha256sum "dist/${{ steps.meta.outputs.artifact_name }}.tar.gz" > "dist/${{ steps.meta.outputs.artifact_name }}.sha256"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          name: ${{ steps.meta.outputs.artifact_name }}
-          path: |
-            dist/${{ steps.meta.outputs.artifact_name }}.tar.gz
-            dist/${{ steps.meta.outputs.artifact_name }}.sha256
-          if-no-files-found: error
-          retention-days: 30
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image to GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.ref.name=${{ github.ref_name }}
