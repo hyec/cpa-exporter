@@ -1,0 +1,27 @@
+services:
+  fake-cpa:
+    build:
+      context: .
+      target: fake-cpa
+    environment:
+      MANAGEMENT_PASSWORD: integration-secret
+    ports:
+      - "8317"
+
+  exporter:
+    build:
+      context: .
+      target: exporter
+    command:
+      - --mode=http
+      - --cpa-url=http://fake-cpa:8317
+      - --listen-address=:9321
+      - --poll-interval=1s
+      - --poll-idle-interval=2s
+      - --poll-count=10
+    environment:
+      CPA_MANAGEMENT_KEY: integration-secret
+    ports:
+      - "127.0.0.1::9321"
+    depends_on:
+      - fake-cpa

@@ -1,0 +1,6 @@
+/cpa-exporter
+/.codex
+/dist/
+/bin/
+*.test
+coverage.out
