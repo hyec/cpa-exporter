@@ -198,7 +198,7 @@ func (m *Metrics) baseLabelValues(record UsageRecord) []string {
 
 func (m *Metrics) appendOptionalLabels(labels []string, record UsageRecord) []string {
 	if m.options.LabelSource {
-		labels = append(labels, record.Source)
+		labels = append(labels, maskedSourceLabel(record.Source))
 	}
 	if m.options.LabelAuthIndex {
 		labels = append(labels, record.AuthIndex)
@@ -222,4 +222,44 @@ func apiKeyPrefixLabel(apiKey string, length int) string {
 		return trimmed
 	}
 	return string(runes[:length])
+}
+
+func maskedSourceLabel(source string) string {
+	trimmed := strings.TrimSpace(source)
+	if trimmed == "" || trimmed == "unknown" {
+		return "unknown"
+	}
+	if masked, ok := maskedEmailLabel(trimmed); ok {
+		return masked
+	}
+	return maskedKeyLabel(trimmed)
+}
+
+func maskedEmailLabel(value string) (string, bool) {
+	at := strings.LastIndex(value, "@")
+	if at <= 0 || at == len(value)-1 {
+		return "", false
+	}
+	local := value[:at]
+	domain := strings.TrimSpace(value[at+1:])
+	if strings.Contains(local, "@") || strings.Contains(domain, "@") || domain == "" {
+		return "", false
+	}
+	localRunes := []rune(local)
+	if len(localRunes) == 0 {
+		return "", false
+	}
+	return string(localRunes[0]) + "***@" + domain, true
+}
+
+func maskedKeyLabel(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 8 {
+		visible := len(runes) / 3
+		if visible == 0 {
+			return strings.Repeat("*", len(runes))
+		}
+		return strings.Repeat("*", len(runes)-visible) + string(runes[len(runes)-visible:])
+	}
+	return string(runes[:4]) + "***" + string(runes[len(runes)-4:])
 }

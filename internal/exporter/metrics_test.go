@@ -37,6 +37,16 @@ func TestMetricsObserve(t *testing.T) {
 	if !hasMetricFamily(families, "cpa_tokens_total") {
 		t.Fatal("missing cpa_tokens_total")
 	}
+	requests := metricFamilyByName(families, "cpa_requests_total")
+	if requests == nil || len(requests.GetMetric()) == 0 {
+		t.Fatal("missing cpa_requests_total metric")
+	}
+	if !metricHasLabel(requests.GetMetric()[0], "source", "u***@example.com") {
+		t.Fatalf("missing masked source=%q label", "u***@example.com")
+	}
+	if metricHasLabel(requests.GetMetric()[0], "source", "user@example.com") {
+		t.Fatal("source label should not expose the raw email")
+	}
 }
 
 func TestMetricsAPIKeyPrefixLabelDisabledByDefault(t *testing.T) {
@@ -106,6 +116,32 @@ func TestAPIKeyPrefixLabel(t *testing.T) {
 			got := apiKeyPrefixLabel(test.key, test.length)
 			if got != test.want {
 				t.Fatalf("apiKeyPrefixLabel(%q, %d) = %q, want %q", test.key, test.length, got, test.want)
+			}
+		})
+	}
+}
+
+func TestMaskedSourceLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "empty", source: "  ", want: "unknown"},
+		{name: "unknown", source: "unknown", want: "unknown"},
+		{name: "email", source: "user@example.com", want: "u***@example.com"},
+		{name: "trimmed email", source: "  admin@example.org  ", want: "a***@example.org"},
+		{name: "long api key", source: "sk-abcdef1234J0", want: "sk-a***34J0"},
+		{name: "eight char api key", source: "sk-short", want: "******rt"},
+		{name: "short api key", source: "abc123", want: "****23"},
+		{name: "tiny api key", source: "ab", want: "**"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := maskedSourceLabel(test.source)
+			if got != test.want {
+				t.Fatalf("maskedSourceLabel(%q) = %q, want %q", test.source, got, test.want)
 			}
 		})
 	}
