@@ -41,8 +41,8 @@ func TestMetricsObserve(t *testing.T) {
 	if requests == nil || len(requests.GetMetric()) == 0 {
 		t.Fatal("missing cpa_requests_total metric")
 	}
-	if !metricHasLabel(requests.GetMetric()[0], "source", "u***@example.com") {
-		t.Fatalf("missing masked source=%q label", "u***@example.com")
+	if !metricHasLabel(requests.GetMetric()[0], "source", "***r@example.com") {
+		t.Fatalf("missing masked source=%q label", "***r@example.com")
 	}
 	if metricHasLabel(requests.GetMetric()[0], "source", "user@example.com") {
 		t.Fatal("source label should not expose the raw email")
@@ -129,8 +129,9 @@ func TestMaskedSourceLabel(t *testing.T) {
 	}{
 		{name: "empty", source: "  ", want: "unknown"},
 		{name: "unknown", source: "unknown", want: "unknown"},
-		{name: "email", source: "user@example.com", want: "u***@example.com"},
-		{name: "trimmed email", source: "  admin@example.org  ", want: "a***@example.org"},
+		{name: "email", source: "user@example.com", want: "***r@example.com"},
+		{name: "trimmed email", source: "  admin@example.org  ", want: "****n@example.org"},
+		{name: "long email", source: "username1234@example.net", want: "user***1234@example.net"},
 		{name: "long api key", source: "sk-abcdef1234J0", want: "sk-a***34J0"},
 		{name: "eight char api key", source: "sk-short", want: "******rt"},
 		{name: "short api key", source: "abc123", want: "****23"},

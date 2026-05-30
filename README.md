@@ -72,7 +72,7 @@ By default, `api_key` and `request_id` are never exported as labels. Optional ac
 --label-source --label-auth-index
 ```
 
-`--label-source` exports a masked `source` label instead of the raw value. Email sources keep the first local-part character and domain, such as `u***@example.com`. Non-email sources keep the first 4 and last 4 characters for long values with a compact `***` mask; short values mask at least two thirds of the characters. Use these only when you are comfortable with the extra cardinality.
+`--label-source` exports a masked `source` label instead of the raw value. Email sources mask the local part with the same rule as API keys while keeping the domain, such as `user***1234@example.com` for long values or `***r@example.com` for short values. Non-email sources keep the first 4 and last 4 characters for long values with a compact `***` mask; short values mask at least two thirds of the characters. Use these only when you are comfortable with the extra cardinality.
 
 You can also opt in to an API key prefix label:
 

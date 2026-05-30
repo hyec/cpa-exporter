@@ -249,7 +249,7 @@ func maskedEmailLabel(value string) (string, bool) {
 	if len(localRunes) == 0 {
 		return "", false
 	}
-	return string(localRunes[0]) + "***@" + domain, true
+	return maskedKeyLabel(local) + "@" + domain, true
 }
 
 func maskedKeyLabel(value string) string {
