@@ -1,0 +1,62 @@
+{
+  "system": "Linux-6.18.60-Unraid-x86_64-with-glibc2.42",
+  "records": 10000,
+  "label_combinations": 100,
+  "scrapes": 50,
+  "repeats": 3,
+  "unit": "KiB",
+  "binaries": {
+    "Go": {
+      "sha256": "524d84dbc1426d11fa1eaef293285ce1a2dd7562727afb79c9e8011f4f06ee90",
+      "binary_bytes": 17316951,
+      "runs": [
+        {
+          "idle_rss_kib": 13700,
+          "loaded_rss_kib": 20168.0,
+          "peak_rss_kib": 20472
+        },
+        {
+          "idle_rss_kib": 17768,
+          "loaded_rss_kib": 22396.0,
+          "peak_rss_kib": 22440
+        },
+        {
+          "idle_rss_kib": 17648,
+          "loaded_rss_kib": 24192.0,
+          "peak_rss_kib": 24200
+        }
+      ],
+      "median": {
+        "idle_rss_kib": 17648,
+        "loaded_rss_kib": 22396.0,
+        "peak_rss_kib": 22440
+      }
+    },
+    "Rust": {
+      "sha256": "b24513d4636148ccb7b6dae3f9b7ced509f62e9146f7a867eb7a409ba4a95f57",
+      "binary_bytes": 2613120,
+      "runs": [
+        {
+          "idle_rss_kib": 3172,
+          "loaded_rss_kib": 7088.0,
+          "peak_rss_kib": 7088
+        },
+        {
+          "idle_rss_kib": 3132,
+          "loaded_rss_kib": 7048.0,
+          "peak_rss_kib": 7048
+        },
+        {
+          "idle_rss_kib": 3280,
+          "loaded_rss_kib": 7204.0,
+          "peak_rss_kib": 7204
+        }
+      ],
+      "median": {
+        "idle_rss_kib": 3172,
+        "loaded_rss_kib": 7088.0,
+        "peak_rss_kib": 7088
+      }
+    }
+  }
+}

@@ -20,7 +20,7 @@ attempt=0
 while [ "$attempt" -lt 60 ]; do
   body="$(curl -fsS "$metrics_url" 2>/dev/null || true)"
   if printf '%s\n' "$body" | grep -q 'cpa_requests_total'; then
-    if printf '%s\n' "$body" | grep -q 'provider="gemini"'; then
+    if printf '%s\n' "$body" | grep -q 'provider_name="Gemini Primary"'; then
       printf '%s\n' "$body" | grep 'cpa_requests_total' || true
       printf 'integration compose test passed\n'
       exit 0
