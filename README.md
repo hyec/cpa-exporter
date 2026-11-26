@@ -42,7 +42,7 @@ when collecting from a legacy server:
 ```bash
 CPA_MANAGEMENT_KEY='your-management-key' \
 cargo run --release -- \
-  --label-provider-name=false \
+  --label-name=false \
   --mode=redis \
   --redis-addr=127.0.0.1:8317
 ```
@@ -65,10 +65,10 @@ CPA_EXPORTER_VERBOSE=true
 
 ## Metrics
 
-- `cpa_requests_total{provider,provider_name,model,alias,endpoint,auth_type,failed,status_code}`
-- `cpa_tokens_total{provider,provider_name,model,alias,endpoint,auth_type,token_type}`
-- `cpa_request_latency_seconds{provider,provider_name,model,alias,endpoint,auth_type,failed}`
-- `cpa_usage_record_timestamp_seconds{provider,provider_name,model,alias,endpoint,auth_type}`
+- `cpa_requests_total{provider,name,model,alias,endpoint,auth_type,failed,status_code}`
+- `cpa_tokens_total{provider,name,model,alias,endpoint,auth_type,token_type}`
+- `cpa_request_latency_seconds{provider,name,model,alias,endpoint,auth_type,failed}`
+- `cpa_usage_record_timestamp_seconds{provider,name,model,alias,endpoint,auth_type}`
 - `cpa_exporter_records_total{mode}`
 - `cpa_exporter_decode_errors_total{mode}`
 - `cpa_exporter_collector_errors_total{mode}`
@@ -110,35 +110,46 @@ The compose test starts a fake CPA management API plus the exporter, then verifi
 
 ## Upstream names and Grafana
 
-`provider_name` is enabled by default on request, token, latency, and last-record
-metrics. The exporter reads `GET /v8/management/config/api-keys` at startup and
-every minute, joining each key's `auth_index` to its group's `name`. Name lookup
-requires HTTP management access to the same CPA instance as the
-usage collector. CPA v8 uses HTTP collection; legacy Redis mode has no v8
-provider-group metadata.
+`name` is enabled by default on request, token, latency, and last-record
+metrics. At startup and every minute the exporter fetches both
+`GET /v8/management/credentials` and `GET /v8/management/config/api-keys`,
+joining records by `auth_index`. Name priority is:
 
-Names are shown exactly as configured, including Unicode. Secret `source` and
-`api_key` values are never used as a name fallback. Unnamed, OAuth, unmatched,
-or ambiguous deduplicated credentials use `provider_name="unknown"`. Failed
-refreshes retain the last catalog and log an error; a missing API-key subtree
-clears the catalog. Renaming a group creates new Prometheus series for future
-records; historical labels are unchanged.
+1. Non-empty `note` on the authentication file (trimmed, shown as configured).
+2. Configured API-key upstream group `name`.
+3. Masked email from `source` for Codex OAuth, such as `***r@example.com`.
+4. `unknown` when none is available.
 
-Disable lookup and the label with `--label-provider-name=false` or
-`CPA_EXPORTER_LABEL_PROVIDER_NAME=false`. Optional source/auth-index/key-prefix
-labels remain independent; none are needed to display upstream names.
+Set the authentication file's `note` in CPA to name an OAuth account. The
+exporter only reads credentials metadata; it does not modify authentication files.
+Raw emails and API keys are never used as fallback labels. Duplicate conflicting
+indexes within either catalog resolve to `unknown`. Failed refreshes preserve
+the corresponding previous catalog independently. Removing a note restores
+the next available fallback after a successful refresh. A missing API-key
+subtree clears group names. Note/name edits affect future records, while
+historical time series keep their earlier labels.
+
+Disable metadata lookup and the label with `--label-name=false` or
+`CPA_EXPORTER_LABEL_NAME=false`. The old `--label-provider-name` and
+`CPA_EXPORTER_LABEL_PROVIDER_NAME` remain accepted aliases; the new environment
+variable takes precedence. Optional source/auth-index/key-prefix labels remain
+independent and are not needed for names.
+
+**Migration:** `name` replaces `provider_name`; the old metric label is no longer
+emitted. Update existing PromQL grouping, filters, and legends, or reimport the
+updated dashboard. Older stored series still have `provider_name`.
 
 Import [grafana/cpa-exporter.json](grafana/cpa-exporter.json) and select your
 Prometheus datasource. Its upstream selector, legends, and grouping use
-`provider_name`, for example:
+`name`, for example:
 
 ```promql
-sum by (provider_name) (rate(cpa_requests_total[$__rate_interval]))
-sum by (provider_name, token_type) (rate(cpa_tokens_total[$__rate_interval]))
+sum by (name) (rate(cpa_requests_total[$__rate_interval]))
+sum by (name, token_type) (rate(cpa_tokens_total[$__rate_interval]))
 ```
 
-The management config response may include credentials. The exporter decodes
-only names and indexes and does not persist or log response bodies.
+Management responses may include credentials. The exporter decodes only
+notes, group names, and indexes and does not persist or log response bodies.
 
 For v8 records, token metrics use canonical `token_breakdown` accounting rather
 than legacy `tokens` when present. Input/output totals include their cache and

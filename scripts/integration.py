@@ -36,6 +36,7 @@ class FakeCPA:
         self.lock = threading.Lock()
         self.config_status = 200
         self.queue_status = 200
+        self.credentials = {"files": []}
         self.invalid_paths = []
         self.queue_times = []
         self.config = {"codex": [{"name": "主上游", "keys": [{"auth_index": "a" + str(i), "api-key": "never-log-this"} for i in range(100)]}]}
@@ -58,6 +59,8 @@ class FakeCPA:
                 status = 200
                 if self.headers.get("Authorization") != "Bearer " + KEY:
                     status, data = 401, {"error": "unauthorized"}
+                elif url.path == "/base/v8/management/credentials":
+                    data = owner.credentials
                 elif url.path == "/base/v8/management/config/api-keys":
                     status, data = owner.config_status, owner.config
                 elif url.path == "/base/v8/management/observability/usage/queue":
@@ -170,8 +173,8 @@ def collect(binary, check_logs=True):
             assert not cpa.invalid_paths
             assert value(text, "cpa_requests_total") == 36
             assert value(text, "cpa_exporter_decode_errors_total") == 1
-            assert 'provider_name="主上游"' in text
-            assert 'provider_name="unknown"' in text
+            assert 'name="主上游"' in text
+            assert 'name="unknown"' in text
             assert 'api_key_prefix="client"' in text
             assert 'source="sk-u***1234"' in text
             assert "sk-upstream-secret" not in text
@@ -195,12 +198,51 @@ def collect(binary, check_logs=True):
 def test_names_disabled(binary):
     cpa = FakeCPA([record(1)])
     try:
-        with exporter(binary, cpa, ["--label-provider-name=false"]) as (_, base):
+        with exporter(binary, cpa, ["--label-name=false"]) as (_, base):
             text = wait_for(lambda: (t if value(t, "cpa_requests_total") == 1 else None) if (t := get(base + "/metrics")) else None)
-            assert "provider_name=" not in text
+            assert "name=" not in text
             assert "source=" not in text
             assert "api_key_prefix=" not in text
             assert "auth_index=" not in text
+    finally:
+        cpa.close()
+
+
+def test_codex_oauth_email(binary):
+    oauth = record(1)
+    oauth.update(auth_type="oauth", source="user@example.com", auth_index="oauth-account")
+    invalid = dict(oauth, source="sk-not-an-email", auth_index="invalid-account")
+    cpa = FakeCPA([oauth, invalid])
+    try:
+        with exporter(binary, cpa) as (_, base):
+            text = wait_for(lambda: (t if value(t, "cpa_requests_total") == 2 else None) if (t := get(base + "/metrics")) else None)
+            assert 'name="***r@example.com"' in text
+            assert 'name="unknown"' in text
+            assert 'user@example.com' not in text
+            assert 'sk-not-an-email' not in text
+            assert 'source=' not in text
+        with cpa.lock:
+            cpa.records.append(oauth)
+        with exporter(binary, cpa, ["--label-name=false"]) as (_, base):
+            text = wait_for(lambda: (t if value(t, "cpa_requests_total") == 1 else None) if (t := get(base + "/metrics")) else None)
+            assert 'name=' not in text
+            assert 'example.com' not in text
+    finally:
+        cpa.close()
+
+
+def test_credential_note(binary):
+    oauth = record(1)
+    oauth.update(auth_type="oauth", source="user@example.com", auth_index="oauth-account")
+    cpa = FakeCPA([oauth])
+    cpa.credentials = {"files": [{"auth_index": "oauth-account", "note": '  工作账号 "A"\\测试  ', "email": "never-log-this@example.com"}]}
+    try:
+        with exporter(binary, cpa) as (_, base):
+            text = wait_for(lambda: (t if value(t, "cpa_requests_total") == 1 else None) if (t := get(base + "/metrics")) else None)
+            assert any(("name", '工作账号 "A"\\测试') in labels for (n, labels) in samples(text) if n == "cpa_requests_total")
+            assert 'provider_name=' not in text
+            assert 'user@example.com' not in text
+            assert 'never-log-this' not in text
     finally:
         cpa.close()
 
@@ -250,7 +292,7 @@ def test_redis(binary):
     thread.start()
     cpa = FakeCPA([])
     try:
-        with exporter(binary, cpa, ["--mode=redis", "--label-provider-name=false", "--redis-addr=127.0.0.1:" + str(listener.getsockname()[1])]) as (_, base):
+        with exporter(binary, cpa, ["--mode=redis", "--label-name=false", "--redis-addr=127.0.0.1:" + str(listener.getsockname()[1])]) as (_, base):
             wait_for(lambda: value(get(base + "/metrics"), "cpa_requests_total") == 1)
     finally:
         done.set()
@@ -266,6 +308,8 @@ def main():
     args = parser.parse_args()
     actual = collect(args.binary)
     test_names_disabled(args.binary)
+    test_codex_oauth_email(args.binary)
+    test_credential_note(args.binary)
     test_redis(args.binary)
     if args.reference_binary:
         reference = collect(args.reference_binary, check_logs=False)

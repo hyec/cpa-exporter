@@ -12,7 +12,7 @@ pub struct Config {
     pub poll_count: usize,
     pub redis_addr: String,
     pub verbose: bool,
-    pub label_provider_name: bool,
+    pub label_name: bool,
     pub label_source: bool,
     pub label_auth_index: bool,
     pub api_key_prefix_length: usize,
@@ -33,11 +33,7 @@ const OPTIONS: &[(&str, &str, &str)] = &[
     ("poll-count", "CPA_EXPORTER_POLL_COUNT", "100"),
     ("redis-addr", "CPA_REDIS_ADDR", "127.0.0.1:8317"),
     ("verbose", "CPA_EXPORTER_VERBOSE", "false"),
-    (
-        "label-provider-name",
-        "CPA_EXPORTER_LABEL_PROVIDER_NAME",
-        "true",
-    ),
+    ("label-name", "CPA_EXPORTER_LABEL_NAME", "true"),
     ("label-source", "CPA_EXPORTER_LABEL_SOURCE", "false"),
     ("label-auth-index", "CPA_EXPORTER_LABEL_AUTH_INDEX", "false"),
     (
@@ -46,12 +42,7 @@ const OPTIONS: &[(&str, &str, &str)] = &[
         "0",
     ),
 ];
-const BOOLS: &[&str] = &[
-    "verbose",
-    "label-provider-name",
-    "label-source",
-    "label-auth-index",
-];
+const BOOLS: &[&str] = &["verbose", "label-name", "label-source", "label-auth-index"];
 
 fn boolean(value: &str) -> Result<bool, String> {
     match value.to_ascii_lowercase().as_str() {
@@ -79,6 +70,13 @@ impl Config {
         let mut values = HashMap::new();
         for &(flag, variable, default) in OPTIONS {
             let value = env(variable)
+                .or_else(|| {
+                    if flag == "label-name" {
+                        env("CPA_EXPORTER_LABEL_PROVIDER_NAME")
+                    } else {
+                        None
+                    }
+                })
                 .filter(|v| !v.trim().is_empty())
                 .unwrap_or_else(|| default.into());
             values.insert(flag, value.trim().to_string());
@@ -88,7 +86,15 @@ impl Config {
             if !arg.starts_with('-') {
                 return Err("unexpected positional argument".into());
             }
-            let option = arg.trim_start_matches('-');
+            let raw_option = arg.trim_start_matches('-');
+            let aliased = if raw_option == "label-provider-name" {
+                "label-name".to_owned()
+            } else if let Some(value) = raw_option.strip_prefix("label-provider-name=") {
+                format!("label-name={value}")
+            } else {
+                raw_option.to_owned()
+            };
+            let option = aliased.as_str();
             let (name, value) = match option.split_once('=') {
                 Some((name, value)) => (name, value.to_owned()),
                 None if BOOLS.contains(&option) => (option, "true".into()),
@@ -133,7 +139,7 @@ impl Config {
             poll_count: number("poll-count")?,
             redis_addr: get("redis-addr"),
             verbose: flag("verbose")?,
-            label_provider_name: flag("label-provider-name")?,
+            label_name: flag("label-name")?,
             label_source: flag("label-source")?,
             label_auth_index: flag("label-auth-index")?,
             api_key_prefix_length: number("label-api-key-prefix-length")?,
@@ -164,7 +170,7 @@ impl Config {
         if self.mode == "redis" && self.redis_addr.trim().is_empty() {
             return Err("--redis-addr is required in redis mode".into());
         }
-        if self.mode == "http" || self.label_provider_name {
+        if self.mode == "http" || self.label_name {
             let u = url::Url::parse(&self.cpa_url).map_err(|_| "invalid --cpa-url")?;
             if !matches!(u.scheme(), "http" | "https")
                 || u.host_str().is_none()
@@ -190,7 +196,7 @@ mod tests {
             [
                 "-label-source",
                 "--label-auth-index=true",
-                "-label-provider-name=false",
+                "-label-name=false",
                 "-label-api-key-prefix-length=6",
                 "--poll-interval",
                 "250ms",
@@ -199,7 +205,7 @@ mod tests {
             |key| (key == "CPA_MANAGEMENT_KEY").then(|| "secret".into()),
         )
         .unwrap();
-        assert!(cfg.label_source && cfg.label_auth_index && !cfg.label_provider_name);
+        assert!(cfg.label_source && cfg.label_auth_index && !cfg.label_name);
         assert_eq!(cfg.api_key_prefix_length, 6);
         assert_eq!(cfg.poll_interval, Duration::from_millis(250));
     }
@@ -210,7 +216,7 @@ mod tests {
                 (key == "CPA_MANAGEMENT_KEY").then(|| "secret".into())
             })
         };
-        assert!(parse(vec![]).unwrap().label_provider_name);
+        assert!(parse(vec![]).unwrap().label_name);
         for args in [
             vec!["--poll-count=0"],
             vec!["--poll-interval=0s"],
@@ -223,5 +229,35 @@ mod tests {
             assert!(parse(args).is_err());
         }
         assert!(Config::parse([], |_| None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod name_alias_tests {
+    use super::*;
+    #[test]
+    fn old_and_new_options_and_environment() {
+        for option in ["--label-name=false", "-label-provider-name=false"] {
+            let c = Config::parse([option.into()], |k| {
+                (k == "CPA_MANAGEMENT_KEY").then(|| "secret".into())
+            })
+            .unwrap();
+            assert!(!c.label_name);
+        }
+        let c = Config::parse([], |k| match k {
+            "CPA_MANAGEMENT_KEY" => Some("secret".into()),
+            "CPA_EXPORTER_LABEL_PROVIDER_NAME" => Some("false".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(!c.label_name);
+        let c = Config::parse([], |k| match k {
+            "CPA_MANAGEMENT_KEY" => Some("secret".into()),
+            "CPA_EXPORTER_LABEL_PROVIDER_NAME" => Some("false".into()),
+            "CPA_EXPORTER_LABEL_NAME" => Some("true".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(c.label_name);
     }
 }

@@ -32,9 +32,9 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(cpa_requests_total, provider_name)",
+        "definition": "label_values(cpa_requests_total, name)",
         "query": {
-          "query": "label_values(cpa_requests_total, provider_name)",
+          "query": "label_values(cpa_requests_total, name)",
           "refId": "upstreams"
         },
         "refresh": 1,
@@ -66,8 +66,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (provider_name) (rate(cpa_requests_total{provider_name=~\"$upstream\"}[$__rate_interval]))",
-          "legendFormat": "{{provider_name}}",
+          "expr": "sum by (name) (rate(cpa_requests_total{name=~\"$upstream\"}[$__rate_interval]))",
+          "legendFormat": "{{name}}",
           "range": true
         }
       ],
@@ -105,8 +105,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (provider_name) (rate(cpa_requests_total{provider_name=~\"$upstream\",failed=\"true\"}[$__rate_interval]))",
-          "legendFormat": "{{provider_name}}",
+          "expr": "sum by (name) (rate(cpa_requests_total{name=~\"$upstream\",failed=\"true\"}[$__rate_interval]))",
+          "legendFormat": "{{name}}",
           "range": true
         }
       ],
@@ -144,8 +144,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (provider_name, token_type) (rate(cpa_tokens_total{provider_name=~\"$upstream\",token_type=~\"input|output|reasoning|cache_read|cache_creation\"}[$__rate_interval]))",
-          "legendFormat": "{{provider_name}} / {{token_type}}",
+          "expr": "sum by (name, token_type) (rate(cpa_tokens_total{name=~\"$upstream\",token_type=~\"input|output|reasoning|cache_read|cache_creation\"}[$__rate_interval]))",
+          "legendFormat": "{{name}} / {{token_type}}",
           "range": true
         }
       ],
@@ -183,8 +183,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le, provider_name) (rate(cpa_request_latency_seconds_bucket{provider_name=~\"$upstream\"}[$__rate_interval])))",
-          "legendFormat": "{{provider_name}}",
+          "expr": "histogram_quantile(0.95, sum by (le, name) (rate(cpa_request_latency_seconds_bucket{name=~\"$upstream\"}[$__rate_interval])))",
+          "legendFormat": "{{name}}",
           "range": true
         }
       ],
@@ -222,8 +222,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (provider_name, model) (rate(cpa_requests_total{provider_name=~\"$upstream\"}[$__rate_interval]))",
-          "legendFormat": "{{provider_name}} / {{model}}",
+          "expr": "sum by (name, model) (rate(cpa_requests_total{name=~\"$upstream\"}[$__rate_interval]))",
+          "legendFormat": "{{name}} / {{model}}",
           "range": true
         }
       ],
@@ -261,8 +261,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "time() - max by (provider_name) (cpa_usage_record_timestamp_seconds{provider_name=~\"$upstream\"})",
-          "legendFormat": "{{provider_name}}",
+          "expr": "time() - max by (name) (cpa_usage_record_timestamp_seconds{name=~\"$upstream\"})",
+          "legendFormat": "{{name}}",
           "range": true
         }
       ],

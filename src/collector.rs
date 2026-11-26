@@ -20,6 +20,7 @@ pub struct Collector {
     stop: Arc<AtomicBool>,
     agent: ureq::Agent,
     names: HashMap<String, String>,
+    credential_notes: HashMap<String, String>,
     next_refresh: Instant,
 }
 
@@ -34,6 +35,7 @@ impl Collector {
                 .redirects(0)
                 .build(),
             names: HashMap::new(),
+            credential_notes: HashMap::new(),
             next_refresh: Instant::now(),
         }
     }
@@ -143,23 +145,69 @@ impl Collector {
         self.names = names;
         Ok(())
     }
+    fn refresh_credential_notes(&mut self) -> Result<(), String> {
+        #[derive(Deserialize)]
+        struct Credential {
+            #[serde(default)]
+            auth_index: String,
+            #[serde(default)]
+            note: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Credentials {
+            files: Vec<Credential>,
+        }
+        let response = self.get(&self.endpoint("credentials")?)?;
+        use std::io::Read;
+        let credentials: Credentials =
+            serde_json::from_reader(response.into_reader().take(QUEUE_LIMIT))
+                .map_err(|_| "invalid credential metadata JSON")?;
+        let mut notes = HashMap::new();
+        for credential in credentials.files {
+            let index = credential.auth_index.trim();
+            let note = credential.note.as_deref().unwrap_or("").trim();
+            if index.is_empty() || note.is_empty() {
+                continue;
+            }
+            notes
+                .entry(index.to_owned())
+                .and_modify(|old| {
+                    if old != note {
+                        *old = "unknown".into();
+                    }
+                })
+                .or_insert_with(|| note.to_owned());
+        }
+        self.credential_notes = notes;
+        Ok(())
+    }
     fn refresh_if_due(&mut self) {
-        if self.cfg.label_provider_name && Instant::now() >= self.next_refresh {
+        if self.cfg.label_name && Instant::now() >= self.next_refresh {
             if let Err(err) = self.refresh_names() {
                 eprintln!("provider name lookup failed (keeping previous catalog): {err}");
+            }
+            if let Err(err) = self.refresh_credential_notes() {
+                eprintln!("credential note lookup failed (keeping previous catalog): {err}");
             }
             self.next_refresh = Instant::now() + Duration::from_secs(60);
         }
     }
+    fn name(&self, record: &Record) -> String {
+        if let Some(note) = self.credential_notes.get(record.auth_index.trim()) {
+            return note.clone();
+        }
+        if let Some(name) = self.names.get(record.auth_index.trim()) {
+            return name.clone();
+        }
+        record
+            .codex_oauth_email()
+            .unwrap_or_else(|| "unknown".into())
+    }
     pub fn process(&self, payload: &[u8]) -> bool {
         match serde_json::from_slice::<Record>(payload) {
             Ok(record) => {
-                let name = self
-                    .names
-                    .get(record.auth_index.trim())
-                    .map(String::as_str)
-                    .unwrap_or("unknown");
-                self.metrics.observe(record, name);
+                let name = self.name(&record);
+                self.metrics.observe(record, &name);
                 true
             }
             Err(_) => {
@@ -231,7 +279,7 @@ impl Collector {
                     };
             }
             let mut delay = next_poll.saturating_duration_since(Instant::now());
-            if self.cfg.label_provider_name {
+            if self.cfg.label_name {
                 delay = delay.min(self.next_refresh.saturating_duration_since(Instant::now()));
             }
             self.wait(delay);
@@ -381,7 +429,7 @@ mod tests {
         assert_eq!(c.names.get("c").unwrap(), "Keyless");
         assert_eq!(c.fetch().unwrap(), 3);
         let rendered = String::from_utf8(metrics.render().unwrap()).unwrap();
-        assert!(rendered.contains("provider_name=\"主上游\""));
+        assert!(rendered.contains("name=\"主上游\""));
         assert!(!rendered.contains("sk-do-not-export"));
         assert_eq!(metrics.records.with_label_values(&["http"]).get(), 2);
         assert_eq!(metrics.decode_errors.with_label_values(&["http"]).get(), 1);
@@ -405,5 +453,104 @@ mod tests {
         c.refresh_names().unwrap();
         assert!(c.names.is_empty());
         handle.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod oauth_name_tests {
+    use super::*;
+    #[test]
+    fn configured_name_precedes_email_and_all_metrics_use_fallback() {
+        let cfg =
+            Config::parse([], |k| (k == "CPA_MANAGEMENT_KEY").then(|| "secret".into())).unwrap();
+        let metrics = Arc::new(Metrics::new(&cfg).unwrap());
+        let mut c = Collector::new(cfg, metrics.clone(), Arc::new(AtomicBool::new(false)));
+        let payload=br#"{"provider":"codex","auth_type":"oauth","source":"user@example.com","auth_index":"oauth-1","timestamp":"2026-11-25T00:00:00Z","latency_ms":100,"tokens":{"total_tokens":5}}"#;
+        assert!(c.process(payload));
+        let text = String::from_utf8(metrics.render().unwrap()).unwrap();
+        for family in [
+            "cpa_requests_total",
+            "cpa_tokens_total",
+            "cpa_request_latency_seconds_count",
+            "cpa_usage_record_timestamp_seconds",
+        ] {
+            assert!(
+                text.lines()
+                    .any(|line| line.starts_with(&format!("{family}{{"))
+                        && line.contains("name=\"***r@example.com\""))
+            );
+        }
+        assert!(!text.contains("user@example.com"));
+        assert!(!text.contains("source="));
+        c.names.insert("oauth-1".into(), "Configured".into());
+        let r: Record = serde_json::from_slice(payload).unwrap();
+        assert_eq!(c.name(&r), "Configured");
+        c.names.insert("oauth-1".into(), "unknown".into());
+        assert_eq!(c.name(&r), "unknown");
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+    #[test]
+    fn note_refresh_precedence_removal_and_outage() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let worker = std::thread::spawn(move || {
+            for (status, body) in [
+                (
+                    200,
+                    r#"{"files":[{"auth_index":"oauth","note":"  工作账号  ","email":"never-expose@example.com"}]}"#,
+                ),
+                (503, "secret-error"),
+                (200, "bad-json"),
+                (
+                    200,
+                    r#"{"files":[{"auth_index":"oauth","note":"Renamed"}]}"#,
+                ),
+                (200, r#"{"files":[{"auth_index":"oauth","note":"  "}]}"#),
+                (
+                    200,
+                    r#"{"files":[{"auth_index":"oauth","note":"A"},{"auth_index":"oauth","note":"B"}]}"#,
+                ),
+                (200, r#"{"files":[]}"#),
+            ] {
+                let r = server.recv().unwrap();
+                assert_eq!(r.url(), "/base/v8/management/credentials");
+                assert!(
+                    r.headers()
+                        .iter()
+                        .any(|h| h.field.equiv("Authorization")
+                            && h.value.as_str() == "Bearer secret")
+                );
+                r.respond(tiny_http::Response::from_string(body).with_status_code(status))
+                    .unwrap();
+            }
+        });
+        let cfg = Config::parse([format!("--cpa-url=http://{addr}/base")], |k| {
+            (k == "CPA_MANAGEMENT_KEY").then(|| "secret".into())
+        })
+        .unwrap();
+        let m = Arc::new(Metrics::new(&cfg).unwrap());
+        let mut c = Collector::new(cfg, m.clone(), Arc::new(AtomicBool::new(false)));
+        let record:Record=serde_json::from_str(r#"{"auth_index":"oauth","provider":"codex","auth_type":"oauth","source":"user@example.com"}"#).unwrap();
+        c.names.insert("oauth".into(), "Group".into());
+        c.refresh_credential_notes().unwrap();
+        assert_eq!(c.name(&record), "工作账号");
+        assert!(c.refresh_credential_notes().is_err());
+        assert_eq!(c.name(&record), "工作账号");
+        assert!(c.refresh_credential_notes().is_err());
+        assert_eq!(c.name(&record), "工作账号");
+        c.refresh_credential_notes().unwrap();
+        assert_eq!(c.name(&record), "Renamed");
+        c.refresh_credential_notes().unwrap();
+        assert_eq!(c.name(&record), "Group");
+        c.refresh_credential_notes().unwrap();
+        assert_eq!(c.name(&record), "unknown");
+        c.refresh_credential_notes().unwrap();
+        c.names.clear();
+        assert_eq!(c.name(&record), "***r@example.com");
+        worker.join().unwrap();
     }
 }

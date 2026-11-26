@@ -42,6 +42,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if self.headers.get("Authorization") != "Bearer " + KEY:
             return self.reply(401, {"error": "unauthorized"})
+        if url.path == "/v8/management/credentials":
+            return self.reply(200, {"files": []})
         if url.path == "/v8/management/config/api-keys":
             return self.reply(200, {"gemini": [{"name": "Gemini Primary", "keys": [{"auth_index": "fake-1"}]}]})
         if url.path == "/v8/management/observability/usage/queue":

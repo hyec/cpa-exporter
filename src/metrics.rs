@@ -25,8 +25,8 @@ impl Metrics {
     pub fn new(cfg: &Config) -> prometheus::Result<Self> {
         let registry = Registry::new();
         let mut base = vec!["provider", "model", "alias", "endpoint", "auth_type"];
-        if cfg.label_provider_name {
-            base.push("provider_name");
+        if cfg.label_name {
+            base.push("name");
         }
         if cfg.label_source {
             base.push("source");
@@ -131,7 +131,7 @@ impl Metrics {
         TextEncoder::new().encode(&self.registry.gather(), &mut bytes)?;
         Ok(bytes)
     }
-    pub fn observe(&self, mut r: Record, provider_name: &str) {
+    pub fn observe(&self, mut r: Record, name: &str) {
         r.normalize();
         let alias = if r.alias.trim().is_empty() {
             label(&r.model)
@@ -148,8 +148,8 @@ impl Metrics {
         .into_iter()
         .map(str::to_owned)
         .collect();
-        if self.cfg.label_provider_name {
-            values.push(label(provider_name).into());
+        if self.cfg.label_name {
+            values.push(label(name).into());
         }
         if self.cfg.label_source {
             values.push(masked_source(&r.source));
@@ -227,7 +227,7 @@ mod tests {
         m.observe(r, "主上游");
         let text = String::from_utf8(m.render().unwrap()).unwrap();
         for expected in [
-            "provider_name=\"主上游\"",
+            "name=\"主上游\"",
             "source=\"***r@example.com\"",
             "status_code=\"200\"",
             "le=\"0.005\"",

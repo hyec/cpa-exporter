@@ -62,6 +62,26 @@ pub fn label(value: &str) -> &str {
 }
 
 impl Record {
+    // Only Codex OAuth email sources may supply a name fallback. API keys and
+    // other source values must never become an unmasked metric label.
+    pub fn codex_oauth_email(&self) -> Option<String> {
+        if !self.provider.trim().eq_ignore_ascii_case("codex")
+            || !self.auth_type.trim().eq_ignore_ascii_case("oauth")
+        {
+            return None;
+        }
+        let source = self.source.trim();
+        let (local, domain) = source.split_once('@')?;
+        if local.is_empty()
+            || domain.is_empty()
+            || domain.contains('@')
+            || source.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return None;
+        }
+        Some(masked_source(source))
+    }
+
     pub fn normalize(&mut self) {
         if let Some(b) = &self.token_breakdown {
             self.tokens = Tokens {
@@ -162,6 +182,44 @@ mod tests {
             ("上游秘密凭证测试九十", "上游秘密***测试九十"),
         ] {
             assert_eq!(masked_source(input), want);
+        }
+    }
+}
+
+#[cfg(test)]
+mod oauth_tests {
+    use super::*;
+    #[test]
+    fn only_codex_oauth_email_is_accepted() {
+        for (provider, auth_type, source, expected) in [
+            (
+                "codex",
+                "oauth",
+                "user@example.com",
+                Some("***r@example.com"),
+            ),
+            (
+                " Codex ",
+                " OAuth ",
+                " user@example.com ",
+                Some("***r@example.com"),
+            ),
+            ("codex", "api-key", "user@example.com", None),
+            ("claude", "oauth", "user@example.com", None),
+            ("codex", "oauth", "sk-secret", None),
+            ("codex", "oauth", "a@b@c", None),
+            ("codex", "oauth", "a@", None),
+            ("codex", "oauth", "@example.com", None),
+            ("codex", "oauth", "user name@example.com", None),
+            ("codex", "oauth", "user@example.com\nsecret", None),
+        ] {
+            let r = Record {
+                provider: provider.into(),
+                auth_type: auth_type.into(),
+                source: source.into(),
+                ..Default::default()
+            };
+            assert_eq!(r.codex_oauth_email().as_deref(), expected);
         }
     }
 }
